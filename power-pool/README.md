@@ -1,4 +1,4 @@
-# Important Parameters
+<img width="1170" alt="image" src="https://github.com/AnyAxis-Labs/bion-games-contract/assets/53716352/21961f2c-212a-4c6b-9caa-dab43aa2108d"># Important Parameters
 
 ## Random Number contract:
 
@@ -44,7 +44,8 @@ run: `yarn hardhat run scripts/verify.ts --network bsctestnet`
 
 ## Start
 
-![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/bf99ccc9-9739-429c-a4f2-bcac2a55a82e/3d80710a-179f-4bdb-af54-ca57e68d3f87/Untitled.png)
+<img width="1170" alt="image" src="https://github.com/AnyAxis-Labs/bion-games-contract/assets/53716352/27fee5ce-8c37-4578-b758-5d31e1192cf4">
+
 
 First round: Genesis start round
 
