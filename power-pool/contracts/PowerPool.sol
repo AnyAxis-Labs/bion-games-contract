@@ -28,9 +28,6 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
 
     IERC721 public ticket;
 
-    uint256 public bufferSeconds; // number of seconds for valid execution of a prediction round
-    uint256 public intervalSeconds; // interval in seconds between two prediction rounds
-
     uint256 public poolSize; // max ticket bet per round
     uint256 public treasuryFee; // treasury rate (e.g. 200 = 2%, 150 = 1.50%)
 
@@ -75,10 +72,6 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
     event EndRound(uint256 indexed epoch);
 
     event NewAdminAddress(address admin);
-    event NewBufferAndIntervalSeconds(
-        uint256 bufferSeconds,
-        uint256 intervalSeconds
-    );
     event NewPoolSize(uint256 indexed epoch, uint256 poolSize);
     event NewTreasuryFee(uint256 indexed epoch, uint256 treasuryFee);
     event NewOperatorAddress(address operator);
@@ -126,8 +119,6 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
      * @param _randomNumberGenerator: random number generator address
      * @param _adminAddress: admin address
      * @param _operatorAddress: operator address
-     * @param _intervalSeconds: number of time within an interval
-     * @param _bufferSeconds: buffer of time for resolution of price
      * @param _poolSize: pool size
      * @param _treasuryFee: treasury fee (1000 = 10%)
      */
@@ -136,8 +127,6 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
         address _randomNumberGenerator,
         address _adminAddress,
         address _operatorAddress,
-        uint256 _intervalSeconds,
-        uint256 _bufferSeconds,
         uint256 _poolSize,
         uint256 _treasuryFee
     ) {
@@ -146,8 +135,6 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
         randomNumberGenerator = RandomNumberGenerator(_randomNumberGenerator);
         adminAddress = _adminAddress;
         operatorAddress = _operatorAddress;
-        intervalSeconds = _intervalSeconds;
-        bufferSeconds = _bufferSeconds;
         poolSize = _poolSize;
         treasuryFee = _treasuryFee;
         ticket = IERC721(_ticketAddress);
@@ -173,6 +160,10 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
 
         for (uint256 i = 0; i < batchLength; i++) {
             _play(epoch, tokenIds[i]);
+        }
+
+        if (rounds[epoch].totalTicket == poolSize) {
+            _executeRound();
         }
     }
 
@@ -207,7 +198,7 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
     function _claim(uint256 epoch, address user) internal {
         Round memory round = rounds[epoch];
         require(round.startTimestamp != 0, "Round has not started");
-        require(block.timestamp > round.endTimestamp, "Round has not ended");
+
         uint256[] memory tokenIds;
         uint256 tokenIdsLength;
         // Round valid, claim rewards
@@ -262,8 +253,7 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
     function _claimTreasury(uint256 epoch) internal {
         Round memory round = rounds[epoch];
         require(round.startTimestamp != 0, "Round has not started");
-        require(block.timestamp > round.endTimestamp, "Round has not ended");
-        require(round.oracleState != OracleState.Unknown, "Round not valid");
+        require(round.oracleState != OracleState.Unknown, "Round not executed");
         require(!round.treasuryClaimed, "Treasury already claimed");
 
         if (round.oracleState == OracleState.Requested) {
@@ -287,12 +277,7 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
      * @notice Start the next round n, lock price for round n-1, end round n-2
      * @dev Callable by operator
      */
-    function executeRound() external whenNotPaused onlyOperator {
-        require(
-            genesisStartOnce,
-            "Can only run after genesisStartRound is triggered"
-        );
-
+    function _executeRound() internal {
         // CurrentEpoch refers to previous round (n-1)
         _safeEndRound(currentEpoch);
 
@@ -333,24 +318,6 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
         _unpause();
 
         emit Unpause(currentEpoch);
-    }
-
-    /**
-     * @notice Set buffer and interval (in seconds)
-     * @dev Callable by admin
-     */
-    function setBufferAndIntervalSeconds(
-        uint256 _bufferSeconds,
-        uint256 _intervalSeconds
-    ) external whenPaused onlyAdmin {
-        require(
-            _bufferSeconds < _intervalSeconds,
-            "bufferSeconds must be inferior to intervalSeconds"
-        );
-        bufferSeconds = _bufferSeconds;
-        intervalSeconds = _intervalSeconds;
-
-        emit NewBufferAndIntervalSeconds(_bufferSeconds, _intervalSeconds);
     }
 
     /**
@@ -446,7 +413,7 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
         Round memory round = rounds[epoch];
         return
             round.oracleState == OracleState.Unknown &&
-            block.timestamp > round.endTimestamp + bufferSeconds &&
+            currentEpoch > epoch &&
             !playInfos[epoch][user].refunded;
     }
 
@@ -513,20 +480,14 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
             "Can only end round after round has started"
         );
         require(
-            block.timestamp >= rounds[epoch].endTimestamp ||
-                rounds[epoch].totalTicket == poolSize,
-            "Can only end round after endTimestamp or round full"
-        );
-        require(
-            block.timestamp <= rounds[epoch].endTimestamp + bufferSeconds,
-            "Can only end round within bufferSeconds"
+            rounds[epoch].totalTicket == poolSize,
+            "Can only end round after round full"
         );
 
         Round storage round = rounds[epoch];
         uint256 requestId = randomNumberGenerator.getRandomNumber();
-        if (block.timestamp < round.endTimestamp) {
-            round.endTimestamp = block.timestamp;
-        }
+        round.endTimestamp = block.timestamp;
+
         round.requestId = requestId;
         round.oracleState = OracleState.Requested;
 
@@ -558,7 +519,6 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
     function _startRound(uint256 epoch) internal {
         Round storage round = rounds[epoch];
         round.startTimestamp = block.timestamp;
-        round.endTimestamp = block.timestamp + intervalSeconds;
         round.epoch = epoch;
         round.totalTicket = 0;
 
@@ -573,8 +533,7 @@ contract PowerPool is Ownable, Pausable, ReentrancyGuard {
     function _playable(uint256 epoch) internal view returns (bool) {
         return
             rounds[epoch].startTimestamp != 0 &&
-            block.timestamp > rounds[epoch].startTimestamp &&
-            block.timestamp < rounds[epoch].endTimestamp;
+            block.timestamp > rounds[epoch].startTimestamp;
     }
 
     function _getResult(

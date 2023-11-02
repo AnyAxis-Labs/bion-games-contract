@@ -16,8 +16,6 @@ import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 
 import { time } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 
-const INTERVAL_SECONDS = 60 * 60 * 24; // 1 day
-const BUFFER_SECONDS = 60 * 10; // 10 minutes
 const POOL_SIZE = 10;
 const TREASURY_FEE = 3000; // 10%
 
@@ -68,8 +66,6 @@ describe("Greater", () => {
             await randomNumber.getAddress(),
             owner.address,
             operator.address,
-            INTERVAL_SECONDS,
-            BUFFER_SECONDS,
             POOL_SIZE,
             TREASURY_FEE,
         );
@@ -102,10 +98,6 @@ describe("Greater", () => {
             expect(await powerPool.operatorAddress()).to.equal(
                 operator.address,
             );
-            expect(await powerPool.intervalSeconds()).to.equal(
-                INTERVAL_SECONDS,
-            );
-            expect(await powerPool.bufferSeconds()).to.equal(BUFFER_SECONDS);
             expect(await powerPool.poolSize()).to.equal(POOL_SIZE);
             expect(await powerPool.treasuryFee()).to.equal(TREASURY_FEE);
         });
@@ -134,7 +126,7 @@ describe("Greater", () => {
 
             let round = await powerPool.rounds(epoch);
             expect(round.startTimestamp).to.equal(timestamp);
-            expect(round.endTimestamp).to.equal(timestamp + INTERVAL_SECONDS);
+            expect(round.endTimestamp).to.equal(0);
             expect(round.oracleState).to.equal(0);
             expect(round.totalTicket).to.equal(0);
         });
@@ -180,7 +172,10 @@ describe("Greater", () => {
 
             await expect(
                 powerPool.connect(user_2).play(epoch, [21, 22, 23, 24, 25]),
-            ).to.emit(powerPool, "Play");
+            )
+                .to.emit(powerPool, "Play")
+                .to.emit(powerPool, "EndRound")
+                .to.emit(powerPool, "StartRound");
 
             round = await powerPool.rounds(epoch);
             expect(round.totalTicket).to.equal(10);
@@ -209,9 +204,6 @@ describe("Greater", () => {
             expect(userTokenIds[3]).to.equal(24);
             expect(userTokenIds[4]).to.equal(25);
 
-            await expect(powerPool.connect(operator).executeRound())
-                .to.emit(powerPool, "EndRound")
-                .to.emit(powerPool, "StartRound");
             let timestamp = await time.latest();
 
             await expect(
@@ -262,64 +254,6 @@ describe("Greater", () => {
         });
     });
 
-    describe("Round not full", () => {
-        beforeEach(async () => {
-            await powerPool.connect(operator).genesisStartRound();
-            await time.increase(INTERVAL_SECONDS);
-            await powerPool.connect(operator).executeRound();
-
-            let epoch = await powerPool.currentEpoch();
-            await expect(
-                powerPool.connect(user_1).play(epoch, [1, 2, 3, 4, 5]),
-            ).to.emit(powerPool, "Play");
-
-            await expect(
-                powerPool.connect(user_2).play(epoch, [21, 22, 23]),
-            ).to.emit(powerPool, "Play");
-        });
-
-        it("Should not able to execute round if round not full", async () => {
-            await expect(
-                powerPool.connect(operator).executeRound(),
-            ).to.be.revertedWith(
-                "Can only end round after endTimestamp or round full",
-            );
-        });
-
-        it("Should able to play after endTimeStamp", async () => {
-            let epoch = await powerPool.currentEpoch();
-            await time.increase(INTERVAL_SECONDS);
-            await expect(powerPool.connect(operator).executeRound())
-                .to.emit(powerPool, "EndRound")
-                .to.emit(powerPool, "StartRound");
-
-            await coordinator.fullfillRandomWords(
-                await randomNumber.getAddress(),
-                (
-                    await powerPool.rounds(epoch)
-                ).requestId,
-                [3],
-            );
-
-            expect(await powerPool.claimable(epoch, user_1.address)).to.be.true;
-
-            expect(await powerPool.claimable(epoch, user_2.address)).to.be
-                .false;
-
-            await powerPool.connect(user_1).claim([epoch]);
-            expect(await ticket.ownerOf(1)).to.equal(user_1.address);
-            expect(await ticket.ownerOf(2)).to.equal(user_1.address);
-            expect(await ticket.ownerOf(3)).to.equal(user_1.address);
-            expect(await ticket.ownerOf(4)).to.equal(user_1.address);
-            expect(await ticket.ownerOf(5)).to.equal(user_1.address);
-            expect(await ticket.ownerOf(21)).to.equal(user_1.address);
-
-            await powerPool.connect(owner).claimTreasury([epoch]);
-            expect(await ticket.ownerOf(22)).to.equal(owner.address);
-            expect(await ticket.ownerOf(23)).to.equal(owner.address);
-        });
-    });
-
     describe("Play multiple rounds", () => {
         beforeEach(async () => {
             await powerPool.connect(operator).genesisStartRound();
@@ -329,9 +263,8 @@ describe("Greater", () => {
             ).to.emit(powerPool, "Play");
             await expect(
                 powerPool.connect(user_2).play(epoch, [21, 22, 23, 24, 25]),
-            ).to.emit(powerPool, "Play");
-
-            await expect(powerPool.connect(operator).executeRound())
+            )
+                .to.emit(powerPool, "Play")
                 .to.emit(powerPool, "EndRound")
                 .to.emit(powerPool, "StartRound");
 
@@ -354,9 +287,10 @@ describe("Greater", () => {
                 powerPool.connect(user_2).play(epoch, [26, 27, 28, 29, 30]),
             ).to.emit(powerPool, "Play");
 
-            await expect(
-                powerPool.connect(user_1).play(epoch, [9, 10]),
-            ).to.emit(powerPool, "Play");
+            await expect(powerPool.connect(user_1).play(epoch, [9, 10]))
+                .to.emit(powerPool, "Play")
+                .to.emit(powerPool, "EndRound")
+                .to.emit(powerPool, "StartRound");
 
             let round = await powerPool.rounds(epoch);
             expect(round.totalTicket).to.equal(10);
@@ -377,10 +311,6 @@ describe("Greater", () => {
             expect(userTokenIds[2]).to.equal(8);
             expect(userTokenIds[3]).to.equal(9);
             expect(userTokenIds[4]).to.equal(10);
-
-            await expect(powerPool.connect(operator).executeRound())
-                .to.emit(powerPool, "EndRound")
-                .to.emit(powerPool, "StartRound");
 
             await coordinator.fullfillRandomWords(
                 await randomNumber.getAddress(),
@@ -444,26 +374,14 @@ describe("Greater", () => {
             ).to.emit(powerPool, "Play");
             await expect(
                 powerPool.connect(user_2).play(epoch, [21, 22, 23, 24, 25]),
-            ).to.emit(powerPool, "Play");
-
-            await expect(powerPool.connect(operator).executeRound())
+            )
+                .to.emit(powerPool, "Play")
                 .to.emit(powerPool, "EndRound")
                 .to.emit(powerPool, "StartRound");
 
             await expect(
                 powerPool.connect(user_1).play(epoch, [6]),
             ).to.revertedWith("Play too early/late");
-        });
-
-        it("Round not playable", async () => {
-            await powerPool.connect(operator).genesisStartRound();
-            let epoch = await powerPool.currentEpoch();
-
-            time.increase(INTERVAL_SECONDS);
-
-            await expect(
-                powerPool.connect(user_1).play(epoch, [6]),
-            ).to.revertedWith("Round not playable");
         });
 
         it("Round full", async () => {
@@ -478,15 +396,13 @@ describe("Greater", () => {
 
             await expect(
                 powerPool.connect(user_1).play(epoch, [6]),
-            ).to.revertedWith("Round full");
+            ).to.revertedWith("Play too early/late");
         });
     });
 
     describe("ReGenesis start", () => {
         beforeEach(async () => {
             await powerPool.connect(operator).genesisStartRound();
-            await time.increase(INTERVAL_SECONDS);
-            await powerPool.connect(operator).executeRound();
 
             let epoch = await powerPool.currentEpoch();
             await expect(
@@ -495,9 +411,8 @@ describe("Greater", () => {
 
             await expect(
                 powerPool.connect(user_2).play(epoch, [21, 22, 23, 24, 25]),
-            ).to.emit(powerPool, "Play");
-
-            await expect(powerPool.connect(operator).executeRound())
+            )
+                .to.emit(powerPool, "Play")
                 .to.emit(powerPool, "EndRound")
                 .to.emit(powerPool, "StartRound");
 
@@ -514,28 +429,18 @@ describe("Greater", () => {
             ).to.emit(powerPool, "Play");
 
             await expect(
-                powerPool.connect(user_2).play(epoch, [26, 27, 28, 29, 30]),
+                powerPool.connect(user_2).play(epoch, [26, 27, 28, 29]),
             ).to.emit(powerPool, "Play");
-
-            time.increase(INTERVAL_SECONDS + BUFFER_SECONDS + 1);
-        });
-
-        it("Should not able to executeRound but able to claim old round", async () => {
-            await expect(
-                powerPool.connect(operator).executeRound(),
-            ).to.be.revertedWith("Can only end round within bufferSeconds");
-
-            await expect(powerPool.connect(user_1).claim([2n])).to.emit(
-                powerPool,
-                "Claim",
-            );
         });
 
         it("Should able to refund", async () => {
-            await expect(powerPool.connect(user_1).claim([2n, 3n])).to.emit(
-                powerPool,
-                "Claim",
-            );
+            await powerPool.connect(operator).pause();
+            await powerPool.connect(operator).unpause();
+            await powerPool.connect(operator).genesisStartRound();
+            let epoch = await powerPool.currentEpoch();
+            await expect(
+                powerPool.connect(user_1).claim([epoch - 1n, epoch - 2n]),
+            ).to.emit(powerPool, "Claim");
 
             expect(await ticket.ownerOf(6)).to.equal(user_1.address);
             expect(await ticket.ownerOf(7)).to.equal(user_1.address);
@@ -543,61 +448,7 @@ describe("Greater", () => {
             expect(await ticket.ownerOf(9)).to.equal(user_1.address);
             expect(await ticket.ownerOf(10)).to.equal(user_1.address);
 
-            await expect(powerPool.connect(user_2).claim([3n])).to.emit(
-                powerPool,
-                "Claim",
-            );
-        });
-
-        it("ReGenesis start", async () => {
-            await expect(powerPool.connect(operator).pause()).to.emit(
-                powerPool,
-                "Pause",
-            );
-
-            await expect(powerPool.connect(operator).unpause()).to.emit(
-                powerPool,
-                "Unpause",
-            );
-
-            expect(await powerPool.genesisStartOnce()).to.be.false;
-
-            await powerPool.connect(operator).genesisStartRound();
-            expect(await powerPool.genesisStartOnce()).to.be.true;
-            let epoch = await powerPool.currentEpoch();
-            expect(epoch).to.equal(4n);
-
-            await expect(powerPool.connect(user_1).claim([2n, 3n])).to.emit(
-                powerPool,
-                "Claim",
-            );
-
-            await expect(powerPool.connect(user_2).claim([3n])).to.emit(
-                powerPool,
-                "Claim",
-            );
-
-            await expect(
-                powerPool.connect(user_1).play(epoch, [6, 7, 8, 9, 10]),
-            ).to.emit(powerPool, "Play");
-
-            await expect(
-                powerPool.connect(user_2).play(epoch, [26, 27, 28, 29, 30]),
-            ).to.emit(powerPool, "Play");
-
-            await expect(powerPool.connect(operator).executeRound())
-                .to.emit(powerPool, "EndRound")
-                .to.emit(powerPool, "StartRound");
-
-            await coordinator.fullfillRandomWords(
-                await randomNumber.getAddress(),
-                (
-                    await powerPool.rounds(epoch)
-                ).requestId,
-                [10],
-            );
-
-            await expect(powerPool.connect(user_1).claim([4n])).to.emit(
+            await expect(powerPool.connect(user_2).claim([epoch - 1n])).to.emit(
                 powerPool,
                 "Claim",
             );
@@ -625,31 +476,6 @@ describe("Greater", () => {
                 .withArgs(user_1.address);
 
             expect(await powerPool.operatorAddress()).to.equal(user_1.address);
-        });
-
-        it("Set buffer and interval", async () => {
-            await expect(
-                powerPool.connect(owner).setBufferAndIntervalSeconds(1, 10),
-            ).to.revertedWith("Pausable: not paused");
-
-            await powerPool.connect(operator).pause();
-
-            await expect(
-                powerPool.connect(user_1).setBufferAndIntervalSeconds(1, 10),
-            ).to.revertedWith("Not admin");
-            await expect(
-                powerPool.connect(owner).setBufferAndIntervalSeconds(1, 1),
-            ).to.revertedWith(
-                "bufferSeconds must be inferior to intervalSeconds",
-            );
-            await expect(
-                powerPool.connect(owner).setBufferAndIntervalSeconds(1, 10),
-            )
-                .to.emit(powerPool, "NewBufferAndIntervalSeconds")
-                .withArgs(1, 1);
-
-            expect(await powerPool.bufferSeconds()).to.equal(1);
-            expect(await powerPool.intervalSeconds()).to.equal(10);
         });
 
         it("Set pool size", async () => {
