@@ -6,8 +6,6 @@ export const Config = {
     ticket_address: "0x6a2aad07396b36fe02a22b33cf443582f682c82f",
     admin_address: "0x5640FE6191391CD7FeCEB8A289DEA137D9B459E0",
     operator_address: "0x5640FE6191391CD7FeCEB8A289DEA137D9B459E0",
-    interval_seconds: 60 * 60 * 24,
-    buffer_seconds: 60 * 60 * 24,
     pool_size: 100,
     treasury_fee: 3000, //30%
 };

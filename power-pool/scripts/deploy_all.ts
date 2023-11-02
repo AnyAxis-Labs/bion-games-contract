@@ -33,7 +33,7 @@ async function main() {
     const randomNumber = await RandomNumberGenerator.deploy(
         Config.coordinator,
         Config.subscription_id,
-        Config.key_hash
+        Config.key_hash,
     );
     await randomNumber.waitForDeployment();
 
@@ -49,8 +49,6 @@ async function main() {
         await randomNumber.getAddress(),
         Config.admin_address,
         Config.operator_address,
-        Config.interval_seconds,
-        Config.buffer_seconds,
         Config.pool_size,
         Config.treasury_fee,
     );
