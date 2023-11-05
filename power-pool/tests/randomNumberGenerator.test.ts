@@ -24,8 +24,6 @@ describe("Greater", () => {
             "0x6a2aad07396b36fe02a22b33cf443582f682c82f",
             3187,
             "0xd4bb89654db74673a187bd804519e65e3f71a52bc55f11da7601a13dcf505314",
-            100_000,
-            3,
         );
         await randomNumber.waitForDeployment();
         console.log(
